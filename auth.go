@@ -5,14 +5,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
 	"net/url"
 	"time"
-
-	"github.com/jxskiss/mcli"
 )
 
 type AuthTokenCache struct {
@@ -28,20 +25,7 @@ type AccessTokenResponse struct {
 	ExpiresIn   int64  `json:"expires_in"`
 }
 
-type Context struct {
-	Username       string
-	Password       string
-	ClientId       string
-	GatewayId      string
-	InstallationId string
-	DeviceId       string
-	RedirectUri    string
-	CodeVerifier   string
-	Cache          Cache
-}
-
 const IAM_BASE_URL = "https://iam.viessmann.com"
-const API_BASE_URL = "https://api.viessmann-platform.io"
 const CACHE_AUTH_TOKEN_KEY = "vs_auth_token"
 
 func generateRandomString(n int) string {
@@ -142,82 +126,4 @@ func performAuthorizationFlow(httpClient http.Client, context Context) (string, 
 	}
 
 	return accessTokenResponse.AccessToken, nil
-}
-
-func retrieveFeaturesJson(httpClient http.Client, accessToken string, context Context) (string, error) {
-	featuresUrl := API_BASE_URL + "/iot/v2/features/installations/" + context.InstallationId + "/gateways/" + context.GatewayId + "/devices/" + context.DeviceId + "/features"
-	req, _ := http.NewRequest("GET", featuresUrl, nil)
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		// if there is an error, return empty string
-		return "", errors.New("Error getting features JSON")
-	}
-
-	defer resp.Body.Close()
-	jsonBody, _ := io.ReadAll(resp.Body)
-
-	return string(jsonBody), nil
-}
-
-func getFeaturesCommand() {
-	var args struct {
-		Username       string `cli:"#R, -u, --user, Username"`
-		Password       string `cli:"#R, -p, --pass, Password"`
-		ClientId       string `cli:"#R, -c, --client, Client ID"`
-		GatewayId      string `cli:"#R, -g, --gate, Gateway ID"`
-		InstallationId string `cli:"#R, -i, --inst, Installation ID"`
-		DeviceId       string `cli:"#O, -d, --dev, Device ID" default:"0"`
-		RedirectUri    string `cli:"#O, -r, --redirect, Redirect URI" default:"http://localhost:4200/"`
-		UseCache       bool   `cli:"#O, -C, --use-cache, Use cache" default:"false"`
-		CachePath      string `cli:"#O, -P, --cache-path, Cache path" default:"/tmp"`
-	}
-
-	mcli.Parse(&args)
-
-	httpClient := &http.Client{
-		// disable redirect following in http client
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-
-	// create context
-	context := Context{
-		Username:       args.Username,
-		Password:       args.Password,
-		ClientId:       args.ClientId,
-		GatewayId:      args.GatewayId,
-		InstallationId: args.InstallationId,
-		DeviceId:       args.DeviceId,
-		RedirectUri:    args.RedirectUri,
-		CodeVerifier:   generateCodeVerifier(),
-	}
-
-	if args.UseCache {
-		// when cache is used, create cache instance and assign it to context
-		context.Cache = FileCache{Path: args.CachePath}
-	}
-
-	// perform authorization flow to get access token
-	accessToken, err := performAuthorizationFlow(*httpClient, context)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	// retrieve features
-	featuresJson, err := retrieveFeaturesJson(*httpClient, accessToken, context)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	fmt.Println(featuresJson)
-}
-
-func main() {
-	mcli.AddRoot(getFeaturesCommand)
-	mcli.Run()
 }
