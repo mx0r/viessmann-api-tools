@@ -10,9 +10,23 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/jxskiss/mcli"
 )
+
+type AuthTokenCache struct {
+	ClientId     string `json:"client_id"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresAt    int64  `json:"expires_at"`
+}
+
+type AccessTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int64  `json:"expires_in"`
+}
 
 type Context struct {
 	Username       string
@@ -23,10 +37,12 @@ type Context struct {
 	DeviceId       string
 	RedirectUri    string
 	CodeVerifier   string
+	Cache          Cache
 }
 
 const IAM_BASE_URL = "https://iam.viessmann.com"
 const API_BASE_URL = "https://api.viessmann-platform.io"
+const CACHE_AUTH_TOKEN_KEY = "vs_auth_token"
 
 func generateRandomString(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -67,7 +83,7 @@ func getAuthorizeCode(httpClient http.Client, context Context) (string, error) {
 	return redirectUrl.Query().Get("code"), nil
 }
 
-func getAccessToken(httpClient http.Client, code string, context Context) (string, error) {
+func getAccessToken(httpClient http.Client, code string, context Context) (AccessTokenResponse, error) {
 	tokenUrl := IAM_BASE_URL + "/idp/v2/token?grant_type=authorization_code&code_verifier=" + context.CodeVerifier + "&client_id=" + context.ClientId + "&redirect_uri=" + context.RedirectUri + "&code=" + code
 	req, _ := http.NewRequest("POST", tokenUrl, nil)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -75,18 +91,30 @@ func getAccessToken(httpClient http.Client, code string, context Context) (strin
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		// if there is an error, return empty string
-		return "", errors.New("Error getting access token")
+		return AccessTokenResponse{}, errors.New("Error getting access token")
 	}
 
 	defer resp.Body.Close()
 	jsonBody, _ := io.ReadAll(resp.Body)
-	bodyMap := map[string]string{}
-	json.Unmarshal(jsonBody, &bodyMap)
+	accessTokenResponse := AccessTokenResponse{}
+	json.Unmarshal(jsonBody, &accessTokenResponse)
 
-	return bodyMap["access_token"], nil
+	return accessTokenResponse, nil
 }
 
 func performAuthorizationFlow(httpClient http.Client, context Context) (string, error) {
+
+	if context.Cache != nil && context.Cache.Has(CACHE_AUTH_TOKEN_KEY) {
+		// if cache is used and there is a cached token, retrieve it
+		cachedTokenJson, _ := context.Cache.Get(CACHE_AUTH_TOKEN_KEY)
+		cachedToken := AuthTokenCache{}
+		json.Unmarshal([]byte(cachedTokenJson), &cachedToken)
+
+		if cachedToken.ExpiresAt > time.Now().Unix() {
+			// when cached token is still valid, return it
+			return cachedToken.AccessToken, nil
+		}
+	}
 
 	// obtain authorize code
 	code, c_err := getAuthorizeCode(httpClient, context)
@@ -95,12 +123,25 @@ func performAuthorizationFlow(httpClient http.Client, context Context) (string, 
 	}
 
 	// obtain access token
-	accessToken, at_err := getAccessToken(httpClient, code, context)
+	accessTokenResponse, at_err := getAccessToken(httpClient, code, context)
 	if at_err != nil {
 		return "", at_err
 	}
 
-	return accessToken, nil
+	if context.Cache != nil {
+		// when cache is used, create cached token information
+		cachedTokenJson, _ := json.Marshal(AuthTokenCache{
+			ClientId:     context.ClientId,
+			AccessToken:  accessTokenResponse.AccessToken,
+			RefreshToken: "",
+			ExpiresAt:    time.Now().Unix() + (accessTokenResponse.ExpiresIn - 60), // one minute less than returned
+		})
+
+		// store token in cache
+		context.Cache.Set(CACHE_AUTH_TOKEN_KEY, string(cachedTokenJson))
+	}
+
+	return accessTokenResponse.AccessToken, nil
 }
 
 func retrieveFeaturesJson(httpClient http.Client, accessToken string, context Context) (string, error) {
@@ -129,6 +170,8 @@ func getFeaturesCommand() {
 		InstallationId string `cli:"#R, -i, --inst, Installation ID"`
 		DeviceId       string `cli:"#O, -d, --dev, Device ID" default:"0"`
 		RedirectUri    string `cli:"#O, -r, --redirect, Redirect URI" default:"http://localhost:4200/"`
+		UseCache       bool   `cli:"#O, -C, --use-cache, Use cache" default:"false"`
+		CachePath      string `cli:"#O, -P, --cache-path, Cache path" default:"/tmp"`
 	}
 
 	mcli.Parse(&args)
@@ -150,6 +193,11 @@ func getFeaturesCommand() {
 		DeviceId:       args.DeviceId,
 		RedirectUri:    args.RedirectUri,
 		CodeVerifier:   generateCodeVerifier(),
+	}
+
+	if args.UseCache {
+		// when cache is used, create cache instance and assign it to context
+		context.Cache = FileCache{Path: args.CachePath}
 	}
 
 	// perform authorization flow to get access token
