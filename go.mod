@@ -1,4 +1,4 @@
-module vsgetfeats.go
+module vsquery
 
 go 1.21.1
 
