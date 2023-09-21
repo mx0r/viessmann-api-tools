@@ -37,7 +37,6 @@ func getFeaturesCommand() {
 		GatewayId      string `cli:"#R, -g, --gate, Gateway ID"`
 		InstallationId string `cli:"#R, -i, --inst, Installation ID"`
 		DeviceId       string `cli:"#O, -d, --dev, Device ID" default:"0"`
-		RedirectUri    string `cli:"#O, -r, --redirect, Redirect URI" default:"http://localhost:4200/"`
 	}
 
 	_, err := mcli.Parse(&args)
