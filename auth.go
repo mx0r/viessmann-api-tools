@@ -25,8 +25,8 @@ type AccessTokenResponse struct {
 	ExpiresIn   int64  `json:"expires_in"`
 }
 
-const IAM_BASE_URL = "https://iam.viessmann.com"
-const CACHE_AUTH_TOKEN_KEY = "vs_auth_token"
+const IamBaseUrl = "https://iam.viessmann.com"
+const CacheAuthTokenKey = "vs_auth_token"
 
 func generateRandomString(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -48,7 +48,7 @@ func deriveCodeChallenge(codeVerifier string) string {
 
 func getAuthorizeCode(httpClient http.Client, context Context) (string, error) {
 	codeChallenge := deriveCodeChallenge(context.CodeVerifier)
-	authorizeUrl := IAM_BASE_URL + "/idp/v2/authorize?response_type=code&client_id=" + context.ClientId + "&redirect_uri=" + context.RedirectUri + "&scope=IoT%20User&code_challenge=" + codeChallenge + "&code_challenge_method=S256"
+	authorizeUrl := IamBaseUrl + "/idp/v2/authorize?response_type=code&client_id=" + context.ClientId + "&redirect_uri=" + context.RedirectUri + "&scope=IoT%20User&code_challenge=" + codeChallenge + "&code_challenge_method=S256"
 	req, _ := http.NewRequest("POST", authorizeUrl, nil)
 	req.SetBasicAuth(context.Username, context.Password)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -56,7 +56,7 @@ func getAuthorizeCode(httpClient http.Client, context Context) (string, error) {
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		// if there is an error, return empty string
-		return "", errors.New("Error getting authorization code")
+		return "", errors.New("error getting authorization code")
 	}
 
 	// otherwise, get location header and parse out "code" from it
@@ -68,31 +68,43 @@ func getAuthorizeCode(httpClient http.Client, context Context) (string, error) {
 }
 
 func getAccessToken(httpClient http.Client, code string, context Context) (AccessTokenResponse, error) {
-	tokenUrl := IAM_BASE_URL + "/idp/v2/token?grant_type=authorization_code&code_verifier=" + context.CodeVerifier + "&client_id=" + context.ClientId + "&redirect_uri=" + context.RedirectUri + "&code=" + code
+	tokenUrl := IamBaseUrl + "/idp/v2/token?grant_type=authorization_code&code_verifier=" + context.CodeVerifier + "&client_id=" + context.ClientId + "&redirect_uri=" + context.RedirectUri + "&code=" + code
 	req, _ := http.NewRequest("POST", tokenUrl, nil)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		// if there is an error, return empty string
-		return AccessTokenResponse{}, errors.New("Error getting access token")
+		return AccessTokenResponse{}, errors.New("error getting access token")
 	}
 
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			panic(err)
+		}
+	}(resp.Body)
+
 	jsonBody, _ := io.ReadAll(resp.Body)
 	accessTokenResponse := AccessTokenResponse{}
-	json.Unmarshal(jsonBody, &accessTokenResponse)
+	jsonErr := json.Unmarshal(jsonBody, &accessTokenResponse)
+	if jsonErr != nil {
+		return AccessTokenResponse{}, jsonErr
+	}
 
 	return accessTokenResponse, nil
 }
 
 func performAuthorizationFlow(httpClient http.Client, context Context) (string, error) {
 
-	if context.Cache != nil && context.Cache.Has(CACHE_AUTH_TOKEN_KEY) {
+	if context.Cache != nil && context.Cache.Has(CacheAuthTokenKey) {
 		// if cache is used and there is a cached token, retrieve it
-		cachedTokenJson, _ := context.Cache.Get(CACHE_AUTH_TOKEN_KEY)
+		cachedTokenJson, _ := context.Cache.Get(CacheAuthTokenKey)
 		cachedToken := AuthTokenCache{}
-		json.Unmarshal([]byte(cachedTokenJson), &cachedToken)
+		jsonErr := json.Unmarshal([]byte(cachedTokenJson), &cachedToken)
+		if jsonErr != nil {
+			return "", jsonErr
+		}
 
 		if cachedToken.ExpiresAt > time.Now().Unix() {
 			// when cached token is still valid, return it
@@ -101,15 +113,15 @@ func performAuthorizationFlow(httpClient http.Client, context Context) (string, 
 	}
 
 	// obtain authorize code
-	code, c_err := getAuthorizeCode(httpClient, context)
-	if c_err != nil {
-		return "", c_err
+	code, cErr := getAuthorizeCode(httpClient, context)
+	if cErr != nil {
+		return "", cErr
 	}
 
 	// obtain access token
-	accessTokenResponse, at_err := getAccessToken(httpClient, code, context)
-	if at_err != nil {
-		return "", at_err
+	accessTokenResponse, atErr := getAccessToken(httpClient, code, context)
+	if atErr != nil {
+		return "", atErr
 	}
 
 	if context.Cache != nil {
@@ -122,7 +134,10 @@ func performAuthorizationFlow(httpClient http.Client, context Context) (string, 
 		})
 
 		// store token in cache
-		context.Cache.Set(CACHE_AUTH_TOKEN_KEY, string(cachedTokenJson))
+		err := context.Cache.Set(CacheAuthTokenKey, string(cachedTokenJson))
+		if err != nil {
+			return "", err
+		}
 	}
 
 	return accessTokenResponse.AccessToken, nil

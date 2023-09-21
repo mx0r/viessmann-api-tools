@@ -10,17 +10,22 @@ import (
 )
 
 func retrieveFeaturesJson(httpClient http.Client, accessToken string, context Context) (string, error) {
-	featuresUrl := API_BASE_URL + "/iot/v2/features/installations/" + context.InstallationId + "/gateways/" + context.GatewayId + "/devices/" + context.DeviceId + "/features"
+	featuresUrl := ApiBaseUrl + "/iot/v2/features/installations/" + context.InstallationId + "/gateways/" + context.GatewayId + "/devices/" + context.DeviceId + "/features"
 	req, _ := http.NewRequest("GET", featuresUrl, nil)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		// if there is an error, return empty string
-		return "", errors.New("Error getting features JSON")
+		return "", errors.New("error getting features JSON")
 	}
 
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			panic(err)
+		}
+	}(resp.Body)
 	jsonBody, _ := io.ReadAll(resp.Body)
 
 	return string(jsonBody), nil
@@ -35,7 +40,10 @@ func getFeaturesCommand() {
 		RedirectUri    string `cli:"#O, -r, --redirect, Redirect URI" default:"http://localhost:4200/"`
 	}
 
-	mcli.Parse(&args)
+	_, err := mcli.Parse(&args)
+	if err != nil {
+		panic(err)
+	}
 
 	// prepare command
 	context, httpClient, accessToken, err := prepareCommand(args.CommonOptions)
