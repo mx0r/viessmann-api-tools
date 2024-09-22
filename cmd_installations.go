@@ -10,7 +10,7 @@ import (
 )
 
 func retrieveInstallationsJson(httpClient http.Client, accessToken string) (string, error) {
-	featuresUrl := ApiBaseUrl + "/iot/v1/equipment/installations?includeGateways=true"
+	featuresUrl := ApiBaseUrl + "/iot/v2/equipment/installations?includeGateways=true"
 	req, _ := http.NewRequest("GET", featuresUrl, nil)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 

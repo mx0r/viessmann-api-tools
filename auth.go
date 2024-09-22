@@ -48,7 +48,7 @@ func deriveCodeChallenge(codeVerifier string) string {
 
 func getAuthorizeCode(httpClient http.Client, context Context) (string, error) {
 	codeChallenge := deriveCodeChallenge(context.CodeVerifier)
-	authorizeUrl := IamBaseUrl + "/idp/v2/authorize?response_type=code&client_id=" + context.ClientId + "&redirect_uri=" + context.RedirectUri + "&scope=IoT%20User&code_challenge=" + codeChallenge + "&code_challenge_method=S256"
+	authorizeUrl := IamBaseUrl + "/idp/v3/authorize?response_type=code&client_id=" + context.ClientId + "&redirect_uri=" + context.RedirectUri + "&scope=IoT%20User&code_challenge=" + codeChallenge + "&code_challenge_method=S256"
 	req, _ := http.NewRequest("POST", authorizeUrl, nil)
 	req.SetBasicAuth(context.Username, context.Password)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -68,7 +68,7 @@ func getAuthorizeCode(httpClient http.Client, context Context) (string, error) {
 }
 
 func getAccessToken(httpClient http.Client, code string, context Context) (AccessTokenResponse, error) {
-	tokenUrl := IamBaseUrl + "/idp/v2/token?grant_type=authorization_code&code_verifier=" + context.CodeVerifier + "&client_id=" + context.ClientId + "&redirect_uri=" + context.RedirectUri + "&code=" + code
+	tokenUrl := IamBaseUrl + "/idp/v3/token?grant_type=authorization_code&code_verifier=" + context.CodeVerifier + "&client_id=" + context.ClientId + "&redirect_uri=" + context.RedirectUri + "&code=" + code
 	req, _ := http.NewRequest("POST", tokenUrl, nil)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 

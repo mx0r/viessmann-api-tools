@@ -25,7 +25,7 @@ type Context struct {
 	Cache          Cache
 }
 
-const ApiBaseUrl = "https://api.viessmann-platform.io"
+const ApiBaseUrl = "https://api.viessmann.com"
 
 func showHelpCommand() {
 	mcli.PrintHelp()
